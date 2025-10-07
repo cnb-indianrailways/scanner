@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Scanner - CamScanner Quality</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            background: #2563eb;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            background: #2563eb;
+            cursor: pointer;
+            border-radius: 50%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        const { useState, useRef, useEffect } = React;
+
+        // Lucide Icons as SVG components
+        const Upload = ({ size = 24, className = "" }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="17 8 12 3 7 8"></polyline>
+                <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+        );
+
+        const Download = ({ size = 24, className = "" }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+        );
+
+        const RotateCw = ({ size = 24, className = "" }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+        );
+
+        const Scan = ({ size = 24, className = "" }) => (
+            <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+            </svg>
+        );
+
+        const DocumentScanner = () => {
+            const [originalImage, setOriginalImage] = useState(null);
+            const [processedImage, setProcessedImage] = useState(null);
+            const [filter, setFilter] = useState('auto');
+            const [brightness, setBrightness] = useState(1.2);
+            const [contrast, setContrast] = useState(1.5);
+            const [processing, setProcessing] = useState(false);
+            const fileInputRef = useRef(null);
+
+            const processImage = (img, filterType, bright, cont) => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                ctx.drawImage(img, 0, 0);
+                
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+
+                if (filterType === 'auto' || filterType === 'bw') {
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        data[i] = avg;
+                        data[i + 1] = avg;
+                        data[i + 2] = avg;
+                    }
+
+                    for (let i = 0; i < data.length; i += 4) {
+                        data[i] = ((data[i] - 128) * cont + 128) * bright;
+                        data[i + 1] = ((data[i + 1] - 128) * cont + 128) * bright;
+                        data[i + 2] = ((data[i + 2] - 128) * cont + 128) * bright;
+                    }
+
+                    const threshold = 200;
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        
+                        if (filterType === 'bw') {
+                            const bwValue = avg > 150 ? 255 : 0;
+                            data[i] = bwValue;
+                            data[i + 1] = bwValue;
+                            data[i + 2] = bwValue;
+                        } else {
+                            if (avg > threshold) {
+                                const whitenFactor = Math.min(1, (avg - threshold) / (255 - threshold));
+                                data[i] = data[i] + (255 - data[i]) * whitenFactor * 0.8;
+                                data[i + 1] = data[i + 1] + (255 - data[i + 1]) * whitenFactor * 0.8;
+                                data[i + 2] = data[i + 2] + (255 - data[i + 2]) * whitenFactor * 0.8;
+                            }
+                        }
+                        
+                        data[i] = Math.min(255, Math.max(0, data[i]));
+                        data[i + 1] = Math.min(255, Math.max(0, data[i + 1]));
+                        data[i + 2] = Math.min(255, Math.max(0, data[i + 2]));
+                    }
+                } else if (filterType === 'grayscale') {
+                    for (let i = 0; i < data.length; i += 4) {
+                        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+                        data[i] = avg;
+                        data[i + 1] = avg;
+                        data[i + 2] = avg;
+                    }
+                } else if (filterType === 'color') {
+                    for (let i = 0; i < data.length; i += 4) {
+                        data[i] = ((data[i] - 128) * cont * 0.9 + 128) * bright;
+                        data[i + 1] = ((data[i + 1] - 128) * cont * 0.9 + 128) * bright;
+                        data[i + 2] = ((data[i + 2] - 128) * cont * 0.9 + 128) * bright;
+                        
+                        data[i] = Math.min(255, Math.max(0, data[i]));
+                        data[i + 1] = Math.min(255, Math.max(0, data[i + 1]));
+                        data[i + 2] = Math.min(255, Math.max(0, data[i + 2]));
+                    }
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+                return canvas.toDataURL('image/png');
+            };
+
+            const handleImageUpload = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setProcessing(true);
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            setOriginalImage(img);
+                            const processed = processImage(img, filter, brightness, contrast);
+                            setProcessedImage(processed);
+                            setProcessing(false);
+                        };
+                        img.src = event.target.result;
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            useEffect(() => {
+                if (originalImage) {
+                    setProcessing(true);
+                    setTimeout(() => {
+                        const processed = processImage(originalImage, filter, brightness, contrast);
+                        setProcessedImage(processed);
+                        setProcessing(false);
+                    }, 100);
+                }
+            }, [filter, brightness, contrast, originalImage]);
+
+            const handleDownload = () => {
+                if (processedImage) {
+                    const link = document.createElement('a');
+                    link.download = `scanned-document-${Date.now()}.png`;
+                    link.href = processedImage;
+                    link.click();
+                }
+            };
+
+            const handleReset = () => {
+                setOriginalImage(null);
+                setProcessedImage(null);
+                setFilter('auto');
+                setBrightness(1.2);
+                setContrast(1.5);
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
+                    <div className="max-w-7xl mx-auto">
+                        <div className="bg-white rounded-2xl shadow-2xl p-8">
+                            <div className="flex items-center justify-between mb-8">
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-blue-600 p-3 rounded-xl">
+                                        <Scan className="text-white" size={32} />
+                                    </div>
+                                    <div>
+                                        <h1 className="text-3xl font-bold text-gray-800">Document Scanner</h1>
+                                        <p className="text-gray-600">CamScanner-style quality for PC</p>
+                                    </div>
+                                </div>
+                                {processedImage && (
+                                    <button
+                                        onClick={handleReset}
+                                        className="flex items-center gap-2 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg transition"
+                                    >
+                                        <RotateCw size={20} />
+                                        New Scan
+                                    </button>
+                                )}
+                            </div>
+
+                            {!originalImage ? (
+                                <div className="border-4 border-dashed border-blue-300 rounded-xl p-16 text-center bg-blue-50 hover:bg-blue-100 transition cursor-pointer"
+                                     onClick={() => fileInputRef.current?.click()}>
+                                    <Upload className="mx-auto mb-4 text-blue-600" size={64} />
+                                    <h3 className="text-2xl font-semibold text-gray-800 mb-2">Upload Document Photo</h3>
+                                    <p className="text-gray-600 mb-4">Click to browse or drag and drop your document image</p>
+                                    <input
+                                        ref={fileInputRef}
+                                        type="file"
+                                        accept="image/*"
+                                        onChange={handleImageUpload}
+                                        className="hidden"
+                                    />
+                                    <button className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition">
+                                        Choose Image
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                                        <div>
+                                            <h3 className="text-lg font-semibold mb-3 text-gray-700">Original Image</h3>
+                                            <div className="border-2 border-gray-300 rounded-lg overflow-hidden bg-gray-50">
+                                                <img src={originalImage.src} alt="Original" className="w-full h-auto" />
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h3 className="text-lg font-semibold mb-3 text-gray-700">Scanned Document</h3>
+                                            <div className="border-2 border-green-300 rounded-lg overflow-hidden bg-white relative">
+                                                {processing && (
+                                                    <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center z-10">
+                                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                                                    </div>
+                                                )}
+                                                {processedImage && (
+                                                    <img src={processedImage} alt="Processed" className="w-full h-auto" />
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="bg-gray-50 rounded-xl p-6 space-y-6">
+                                        <div>
+                                            <label className="block text-sm font-semibold text-gray-700 mb-3">Scan Mode</label>
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                                {[
+                                                    { value: 'auto', label: 'Auto (Best)' },
+                                                    { value: 'bw', label: 'Black & White' },
+                                                    { value: 'grayscale', label: 'Grayscale' },
+                                                    { value: 'color', label: 'Color' }
+                                                ].map(mode => (
+                                                    <button
+                                                        key={mode.value}
+                                                        onClick={() => setFilter(mode.value)}
+                                                        className={`px-4 py-3 rounded-lg font-semibold transition ${
+                                                            filter === mode.value
+                                                                ? 'bg-blue-600 text-white shadow-lg'
+                                                                : 'bg-white text-gray-700 hover:bg-blue-50 border-2 border-gray-300'
+                                                        }`}
+                                                    >
+                                                        {mode.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    Brightness: {brightness.toFixed(1)}
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min="0.5"
+                                                    max="2"
+                                                    step="0.1"
+                                                    value={brightness}
+                                                    onChange={(e) => setBrightness(parseFloat(e.target.value))}
+                                                    className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                                                    Contrast: {contrast.toFixed(1)}
+                                                </label>
+                                                <input
+                                                    type="range"
+                                                    min="0.5"
+                                                    max="3"
+                                                    step="0.1"
+                                                    value={contrast}
+                                                    onChange={(e) => setContrast(parseFloat(e.target.value))}
+                                                    className="w-full h-2 bg-gray-300 rounded-lg appearance-none cursor-pointer"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <button
+                                            onClick={handleDownload}
+                                            className="w-full flex items-center justify-center gap-3 px-6 py-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold text-lg transition shadow-lg"
+                                        >
+                                            <Download size={24} />
+                                            Download Scanned Document
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="mt-6 text-center text-gray-600 text-sm">
+                            <p>✨ Professional document scanning with automatic background whitening and enhancement</p>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<DocumentScanner />);
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</body>
+</html>
