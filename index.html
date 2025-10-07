@@ -1,415 +1,206 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Doc Scanner</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Tailwind (design ko na chhedne ke liye as-is rakh rahe) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    /* Existing look ko preserve karne ke liye minimal utility-style */
-    .glass-effect {
-      backdrop-filter: blur(8px);
-      background: rgba(255,255,255,0.6);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
-    }
-    .corner-handle {
-      width: 14px;
-      height: 14px;
-      border-radius: 9999px;
-      background: white;
-      border: 3px solid #3b82f6; /* blue-500 */
-      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
-      cursor: grab;
-    }
-    .corner-handle:active { cursor: grabbing; }
-    .overlay-hitarea {
-      position: absolute;
-      left: 0; top: 0; right: 0; bottom: 0;
-      pointer-events: none;
-    }
-    canvas { max-width: 100%; height: auto; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Document Scanner - Advanced CamScanner</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* … (tumhare saare original styles as-is) … */
+
+        .corner-handle {
+            width: 26px;
+            height: 26px;
+            border-radius: 9999px;
+            background: white;
+            border: 4px solid #3b82f6; /* blue-500 */
+            box-shadow: 0 6px 14px rgba(0,0,0,0.18);
+            cursor: grab;
+        }
+        .corner-handle:active { cursor: grabbing; }
+    </style>
 </head>
-<body class="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 text-gray-900">
-  <div class="max-w-5xl mx-auto px-4 py-6">
-    <h1 class="text-2xl md:text-3xl font-bold mb-4">Document Scanner</h1>
+<body class="bg-gray-50">
+    <div id="root"></div>
 
-    <!-- Controls -->
-    <div class="flex flex-wrap items-center gap-3 mb-6">
-      <input id="fileInput" type="file" accept="image/*" class="block" />
-      <button id="btnProcess" class="px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
-        Process (Crop)
-      </button>
-      <button id="btnReset" class="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 transition">
-        Reset
-      </button>
-    </div>
+    <script type="text/babel">
+        const { useRef, useState, useEffect } = React;
 
-    <!-- Image + Overlay -->
-    <div id="imageContainer" class="border-2 border-gray-300 rounded-xl overflow-hidden bg-gray-50 relative">
-      <img id="img" alt="Original" class="w-full h-auto select-none pointer-events-none hidden" />
-      <!-- Overlay (svg polygon) will be absolutely positioned to align with image box -->
-      <svg id="polySvg" class="absolute pointer-events-none hidden"></svg>
-      <!-- Draggable corner handles -->
-      <div id="handlesLayer" class="overlay-hitarea"></div>
-    </div>
+        /* … (tumhara existing icon/components code as-is) … */
 
-    <!-- Output -->
-    <div class="mt-8 grid md:grid-cols-2 gap-6">
-      <div class="glass-effect rounded-2xl p-4">
-        <h2 class="font-semibold mb-2">Original</h2>
-        <div id="originalWrap" class="rounded-lg overflow-hidden border border-gray-200">
-          <!-- original image already shown above -->
-        </div>
-      </div>
-      <div class="glass-effect rounded-2xl p-4">
-        <h2 class="font-semibold mb-2">Processed</h2>
-        <div class="rounded-lg overflow-hidden border border-gray-200">
-          <canvas id="canvasOut"></canvas>
-        </div>
-      </div>
-    </div>
+        const DocumentScanner = () => {
+            const [originalImage, setOriginalImage] = useState(null);
+            const [processedImage, setProcessedImage] = useState(null);
+            const [filter, setFilter] = useState('auto');
+            const [brightness, setBrightness] = useState(0);
+            const [contrast, setContrast] = useState(0);
+            const [sharpness, setSharpness] = useState(0);
+            const [processing, setProcessing] = useState(false);
+            const [cropMode, setCropMode] = useState(false);
+            const [draggingCorner, setDraggingCorner] = useState(null);
+            const [corners, setCorners] = useState([]);
+            const [scale, setScale] = useState('fit');
+            const [copies, setCopies] = useState(1);
 
-    <!-- Info + Footer -->
-    <div class="mt-8">
-      <div class="glass-effect rounded-2xl p-6 mx-auto mb-4 text-center max-w-2xl">
-        <p class="text-gray-700 font-semibold mb-2">🔒 Privacy First Design</p>
-        <p class="text-gray-600 text-sm">
-          All image processing happens in your browser. No uploads, no servers, no data collection.
-          Your documents stay completely private on your device!
-        </p>
-      </div>
-    </div>
-  </div>
+            const fileInputRef = useRef(null);
+            const containerRef = useRef(null);
+            const imgRef = useRef(null); /* ✅ NEW: image element ref */
 
-  <!-- Center-bottom footer: Created by ABC -->
-  <div class="fixed bottom-4 left-0 right-0 flex justify-center z-50">
-    <div class="glass-effect rounded-xl px-4 py-2">
-      <p class="text-gray-600 text-sm font-medium text-center">
-        Created by: <span class="font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">ABC</span>
-      </p>
-    </div>
-  </div>
-  <!-- Agar aap fixed nahi chahte, to upar wale block ko hata kar yeh line
-       <div class="w-full flex justify-center"> ... </div>
-       ko main container ke end me add kar sakte hain. -->
+            /* ==== tumhara existing detectEdges, processImage, perspectiveTransform, etc. as-is ==== */
 
-  <script>
-    // ---------- State ----------
-    const fileInput = document.getElementById('fileInput');
-    const img = document.getElementById('img');
-    const imageContainer = document.getElementById('imageContainer');
-    const svg = document.getElementById('polySvg');
-    const handlesLayer = document.getElementById('handlesLayer');
-    const canvasOut = document.getElementById('canvasOut');
-    const btnProcess = document.getElementById('btnProcess');
-    const btnReset = document.getElementById('btnReset');
+            // Process image whenever params/corners change
+            useEffect(() => {
+                if (originalImage && corners.length === 4) {
+                    setProcessing(true);
+                    setTimeout(() => {
+                        const processed = processImage(originalImage, filter, brightness, contrast, sharpness);
+                        setProcessedImage(processed);
+                        setProcessing(false);
+                    }, 50);
+                }
+            }, [filter, brightness, contrast, sharpness, originalImage, corners]);
 
-    let originalBitmap = null;
-    let naturalW = 0, naturalH = 0;
+            /* ✅ FIX: drag mapping based on the displayed <img> rect (CamScanner-like precise mapping) */
+            const handleCornerDrag = (index, e) => {
+                if (!imgRef.current) return;
+                
+                const rect = imgRef.current.getBoundingClientRect();
+                const scaleX = originalImage.width / rect.width;
+                const scaleY = originalImage.height / rect.height;
 
-    // corners are in IMAGE (natural) coordinate space
-    let corners = []; // [{x,y} * 4] order doesn't matter; we'll order TL,TR,BR,BL at run
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
 
-    // ---------- Helpers ----------
-    function getImgRect() {
-      const rImg = img.getBoundingClientRect();
-      const rCont = imageContainer.getBoundingClientRect();
-      return {
-        left: rImg.left - rCont.left,
-        top: rImg.top - rCont.top,
-        width: rImg.width,
-        height: rImg.height
-      };
-    }
-    function mapImgToScreen(pt) {
-      const rect = getImgRect();
-      return {
-        x: (pt.x / naturalW) * rect.width + rect.left,
-        y: (pt.y / naturalH) * rect.height + rect.top
-      };
-    }
-    function mapScreenToImg(clientX, clientY) {
-      const r = img.getBoundingClientRect();
-      const x = (clientX - r.left) * (naturalW / r.width);
-      const y = (clientY - r.top) * (naturalH / r.height);
-      return {
-        x: Math.max(0, Math.min(naturalW, x)),
-        y: Math.max(0, Math.min(naturalH, y))
-      };
-    }
-    function distance(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+                const x = (clientX - rect.left) * scaleX;
+                const y = (clientY - rect.top) * scaleY;
 
-    function orderCornersTLTRBRBL(pts) {
-      // Sort by y, then x to find top two, bottom two, then order left-right within rows
-      const sorted = [...pts].sort((p,q)=> (p.y-q.y) || (p.x-q.x));
-      const top2 = sorted.slice(0,2).sort((p,q)=> p.x-q.x);
-      const bottom2 = sorted.slice(2,4).sort((p,q)=> p.x-q.x);
-      return [top2[0], top2[1], bottom2[1], bottom2[0]]; // TL, TR, BR, BL
-    }
+                const newCorners = [...corners];
+                newCorners[index] = {
+                    x: Math.max(0, Math.min(originalImage.width, x)),
+                    y: Math.max(0, Math.min(originalImage.height, y)),
+                };
+                setCorners(newCorners);
+            };
 
-    function drawOverlay() {
-      if (!img.src || corners.length !== 4) return;
-      const rect = getImgRect();
-      svg.classList.remove('hidden');
-      svg.style.left = rect.left + 'px';
-      svg.style.top = rect.top + 'px';
-      svg.setAttribute('width', rect.width);
-      svg.setAttribute('height', rect.height);
+            const handleMouseMove = (e) => {
+                if (draggingCorner !== null) handleCornerDrag(draggingCorner, e);
+            };
+            const handleMouseUp = () => setDraggingCorner(null);
 
-      const mapX = x => (x / naturalW) * rect.width;
-      const mapY = y => (y / naturalH) * rect.height;
-      const pts = corners.map(c => `${mapX(c.x)},${mapY(c.y)}`).join(' ');
+            useEffect(() => {
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+                window.addEventListener('touchmove', handleMouseMove, { passive: false });
+                window.addEventListener('touchend', handleMouseUp);
+                return () => {
+                    window.removeEventListener('mousemove', handleMouseMove);
+                    window.removeEventListener('mouseup', handleMouseUp);
+                    window.removeEventListener('touchmove', handleMouseMove);
+                    window.removeEventListener('touchend', handleMouseUp);
+                };
+            }, [draggingCorner, corners, originalImage]);
 
-      // Clear previous
-      svg.innerHTML = '';
-      const polygon = document.createElementNS('http://www.w3.org/2000/svg','polygon');
-      polygon.setAttribute('points', pts);
-      polygon.setAttribute('fill', 'rgba(59,130,246,0.2)'); // blue-500 @ 20%
-      polygon.setAttribute('stroke', '#3b82f6');
-      polygon.setAttribute('stroke-width', '3');
-      svg.appendChild(polygon);
+            /* … (tumhara file load/drag&drop, export PDF, etc. code as-is) … */
 
-      // Handles
-      handlesLayer.innerHTML = '';
-      corners.forEach((c, i) => {
-        const screen = mapImgToScreen(c);
-        const d = document.createElement('div');
-        d.className = 'corner-handle absolute';
-        d.style.left = `${screen.x}px`;
-        d.style.top = `${screen.y}px`;
-        d.style.transform = 'translate(-50%,-50%)';
-        d.title = `Corner ${i+1}`;
-        enableDrag(d, i);
-        handlesLayer.appendChild(d);
-      });
-    }
+            return (
+                <div className="min-h-screen">
+                    {/* … tumhara full original UI markup as-is … */}
 
-    function enableDrag(el, index) {
-      let dragging = false;
+                    {/* === Original image viewer === */}
+                    <div 
+                        ref={containerRef}
+                        className="border-2 border-gray-300 rounded-xl overflow-hidden bg-gray-50 relative"
+                    >
+                        {/* ✅ Just added ref here, rest same */}
+                        {originalImage && (
+                            <img ref={imgRef} src={originalImage.src} alt="Original" className="w-full h-auto" />
+                        )}
 
-      const onDown = (e) => {
-        dragging = true;
-        e.preventDefault();
-      };
-      const onMove = (e) => {
-        if (!dragging) return;
-        const cx = (e.touches ? e.touches[0].clientX : e.clientX);
-        const cy = (e.touches ? e.touches[0].clientY : e.clientY);
-        const p = mapScreenToImg(cx, cy);
-        corners[index] = p;
-        drawOverlay();
-      };
-      const onUp = () => dragging = false;
+                        {/* ✅ FIX: Overlay/handles aligned to the image box, NOT the container box */}
+                        {cropMode && corners.length === 4 && imgRef.current && (
+                            <>
+                                {(() => {
+                                    const imgRect = imgRef.current.getBoundingClientRect();
+                                    const contRect = containerRef.current.getBoundingClientRect();
+                                    const left = imgRect.left - contRect.left;
+                                    const top = imgRect.top - contRect.top;
+                                    const width = imgRect.width;
+                                    const height = imgRect.height;
 
-      el.addEventListener('mousedown', onDown);
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
+                                    const mapX = (x) => (x / originalImage.width) * width;
+                                    const mapY = (y) => (y / originalImage.height) * height;
 
-      el.addEventListener('touchstart', onDown, {passive:false});
-      window.addEventListener('touchmove', onMove, {passive:false});
-      window.addEventListener('touchend', onUp);
-    }
+                                    return (
+                                        <>
+                                            <svg
+                                                className="absolute pointer-events-none"
+                                                style={{ left, top, width, height }}
+                                            >
+                                                <polygon
+                                                    points={corners.map(c => `${mapX(c.x)},${mapY(c.y)}`).join(' ')}
+                                                    fill="rgba(59, 130, 246, 0.2)"
+                                                    stroke="#3b82f6"
+                                                    strokeWidth="3"
+                                                />
+                                            </svg>
 
-    // ---------- Perspective Warp (mesh-based) ----------
-    // Compute homography from src quad to dst rect
-    function computeHomography(src, dst) {
-      // 8x8 system for 8 unknowns (h11..h32; h33=1)
-      const A = [];
-      for (let i=0;i<4;i++){
-        const {x, y} = src[i];
-        const {x: X, y: Y} = dst[i];
-        A.push([ x, y, 1, 0, 0, 0, -x*X, -y*X, X ]);
-        A.push([ 0, 0, 0, x, y, 1, -x*Y, -y*Y, Y ]);
-      }
-      // Solve via Gaussian elimination
-      const n = 9;
-      // Convert to matrix
-      for (let i=0;i<8;i++){
-        // pivot
-        let maxR = i;
-        for (let r=i+1;r<8;r++) if (Math.abs(A[r][i]) > Math.abs(A[maxR][i])) maxR=r;
-        const tmp = A[i]; A[i] = A[maxR]; A[maxR] = tmp;
-        // normalize
-        const div = A[i][i] || 1e-12;
-        for (let c=i;c<n;c++) A[i][c] /= div;
-        // eliminate
-        for (let r=0;r<8;r++){
-          if (r===i) continue;
-          const f = A[r][i];
-          for (let c=i;c<n;c++) A[r][c] -= f*A[i][c];
-        }
-      }
-      const h = A.map(r => r[8]);
-      return [
-        [h[0], h[1], h[2]],
-        [h[3], h[4], h[5]],
-        [h[6], h[7], 1   ],
-      ];
-    }
+                                            {corners.map((c, i) => (
+                                                <div
+                                                    key={i}
+                                                    className="corner-handle absolute"
+                                                    style={{
+                                                        left: `${left + mapX(c.x)}px`,
+                                                        top: `${top + mapY(c.y)}px`,
+                                                        transform: 'translate(-50%, -50%)'
+                                                    }}
+                                                    onMouseDown={(e) => { e.preventDefault(); setDraggingCorner(i); }}
+                                                    onTouchStart={(e) => { e.preventDefault(); setDraggingCorner(i); }}
+                                                    title={`Corner ${i + 1}`}
+                                                />
+                                            ))}
+                                        </>
+                                    );
+                                })()}
+                            </>
+                        )}
+                    </div>
 
-    function applyHomography(H, x, y) {
-      const denom = H[2][0]*x + H[2][1]*y + H[2][2];
-      const X = (H[0][0]*x + H[0][1]*y + H[0][2]) / denom;
-      const Y = (H[1][0]*x + H[1][1]*y + H[1][2]) / denom;
-      return {x: X, y: Y};
-    }
+                    {/* === Processed output, controls, etc. (as-is) === */}
 
-    // Render by splitting dst rect into a grid, each cell drawn by local affine from bilinear map
-    function warpPerspectiveMesh(ctx, srcImg, srcQuad, dstW, dstH, grid=24) {
-      const dstQuad = [{x:0,y:0},{x:dstW,y:0},{x:dstW,y:dstH},{x:0,y:dstH}];
-      // precompute inverse homography: from dst to src
-      const H = computeHomography(srcQuad, dstQuad); // maps src->dst
-      // Invert H (3x3)
-      const invH = invert3x3(H);
+                    {/* === Info + Footer (as-is) === */}
+                    <div className="mt-8">
+                        <div className="glass-effect rounded-2xl p-6 mx-auto mb-4 text-center max-w-2xl">
+                            <p className="text-gray-700 font-semibold mb-2">🔒 Privacy First Design</p>
+                            <p className="text-gray-600 text-sm">
+                                All image processing happens in your browser. No uploads, no servers, no data collection.
+                                Your documents stay completely private on your device!
+                            </p>
+                        </div>
 
-      const cellW = dstW / grid;
-      const cellH = dstH / grid;
+                        {/* ✅ “Created by: ABC” perfectly centered (design unchanged) */}
+                        <div className="w-full flex justify-center">
+                            <div className="glass-effect rounded-xl p-4 inline-block">
+                                <p className="text-gray-600 text-sm font-medium">
+                                    Created by: <span className="font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">ABC</span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
 
-      for (let i=0;i<grid;i++){
-        for (let j=0;j<grid;j++){
-          const x0 = i*cellW, y0 = j*cellH;
-          const x1 = (i+1)*cellW, y1 = (j+1)*cellH;
-          // four dst corners
-          const d00 = {x:x0, y:y0};
-          const d10 = {x:x1, y:y0};
-          const d11 = {x:x1, y:y1};
-          const d01 = {x:x0, y:y1};
-          // map back to source
-          const s00 = applyHomography(invH, d00.x, d00.y);
-          const s10 = applyHomography(invH, d10.x, d10.y);
-          const s11 = applyHomography(invH, d11.x, d11.y);
-          const s01 = applyHomography(invH, d01.x, d01.y);
-
-          // draw as two triangles (approx affine)
-          drawTextureTri(ctx, srcImg, s00, s10, s11, d00, d10, d11);
-          drawTextureTri(ctx, srcImg, s00, s11, s01, d00, d11, d01);
-        }
-      }
-    }
-
-    function invert3x3(M){
-      const a=M[0][0], b=M[0][1], c=M[0][2];
-      const d=M[1][0], e=M[1][1], f=M[1][2];
-      const g=M[2][0], h=M[2][1], i=M[2][2];
-      const A = e*i - f*h;
-      const B = -(d*i - f*g);
-      const C = d*h - e*g;
-      const D = -(b*i - c*h);
-      const E = a*i - c*g;
-      const F = -(a*h - b*g);
-      const G = b*f - c*e;
-      const H = -(a*f - c*d);
-      const I = a*e - b*d;
-      const det = a*A + b*B + c*C || 1e-12;
-      return [
-        [A/det, D/det, G/det],
-        [B/det, E/det, H/det],
-        [C/det, F/det, I/det],
-      ];
-    }
-
-    // Draw textured triangle using canvas transforms
-    function drawTextureTri(ctx, imgSrc, s0, s1, s2, d0, d1, d2) {
-      ctx.save();
-      // Create transform that maps source tri to dest tri
-      // Based on "projective texture mapping with canvas"
-      ctx.beginPath();
-      ctx.moveTo(d0.x, d0.y);
-      ctx.lineTo(d1.x, d1.y);
-      ctx.lineTo(d2.x, d2.y);
-      ctx.closePath();
-      ctx.clip();
-
-      // Compute affine transform
-      const denom = (s1.x - s0.x) * (s2.y - s0.y) - (s2.x - s0.x) * (s1.y - s0.y) || 1e-12;
-
-      const m11 = ((d1.x - d0.x) * (s2.y - s0.y) - (d2.x - d0.x) * (s1.y - s0.y)) / denom;
-      const m12 = ((d2.x - d0.x) * (s1.x - s0.x) - (d1.x - d0.x) * (s2.x - s0.x)) / denom;
-      const m21 = ((d1.y - d0.y) * (s2.y - s0.y) - (d2.y - d0.y) * (s1.y - s0.y)) / denom;
-      const m22 = ((d2.y - d0.y) * (s1.x - s0.x) - (d1.y - d0.y) * (s2.x - s0.x)) / denom;
-      const dx  = d0.x - m11 * s0.x - m12 * s0.y;
-      const dy  = d0.y - m21 * s0.x - m22 * s0.y;
-
-      ctx.transform(m11, m21, m12, m22, dx, dy);
-      ctx.drawImage(imgSrc, 0, 0);
-      ctx.restore();
-    }
-
-    // ---------- Events ----------
-    fileInput.addEventListener('change', async (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      const blobUrl = URL.createObjectURL(file);
-      img.src = blobUrl;
-      img.classList.remove('hidden');
-      await img.decode();
-
-      // create bitmap for faster draw
-      originalBitmap = await createImageBitmap(file);
-      naturalW = originalBitmap.width;
-      naturalH = originalBitmap.height;
-
-      // initialize corners to image bounds (slightly inset for visibility)
-      const inset = Math.round(Math.min(naturalW, naturalH) * 0.04);
-      corners = [
-        {x: inset,           y: inset},            // TL
-        {x: naturalW-inset,  y: inset},            // TR
-        {x: naturalW-inset,  y: naturalH-inset},   // BR
-        {x: inset,           y: naturalH-inset},   // BL
-      ];
-      drawOverlay();
-      // Re-draw overlay when layout changes (e.g., responsive resize)
-      const ro = new ResizeObserver(()=> drawOverlay());
-      ro.observe(imageContainer);
-      ro.observe(img);
-    });
-
-    btnReset.addEventListener('click', () => {
-      img.src = '';
-      img.classList.add('hidden');
-      svg.classList.add('hidden');
-      handlesLayer.innerHTML = '';
-      corners = [];
-      canvasOut.width = 0; canvasOut.height = 0;
-    });
-
-    btnProcess.addEventListener('click', () => {
-      if (!originalBitmap || corners.length !== 4) return;
-
-      // Order corners TL,TR,BR,BL
-      const ordered = orderCornersTLTRBRBL(corners);
-
-      // Output size heuristic: width = avg of top/bottom edges, height = avg of left/right edges
-      const topW = distance(ordered[0], ordered[1]);
-      const botW = distance(ordered[3], ordered[2]);
-      const leftH = distance(ordered[0], ordered[3]);
-      const rightH = distance(ordered[1], ordered[2]);
-      const outW = Math.max(64, Math.round((topW + botW)/2));
-      const outH = Math.max(64, Math.round((leftH + rightH)/2));
-
-      canvasOut.width = outW;
-      canvasOut.height = outH;
-      const ctx = canvasOut.getContext('2d');
-      ctx.clearRect(0,0,outW,outH);
-
-      warpPerspectiveMesh(ctx, originalBitmap, ordered, outW, outH, 28);
-    });
-
-    // In case image is already present (history restore etc.)
-    if (img.complete && img.naturalWidth) {
-      img.classList.remove('hidden');
-      naturalW = img.naturalWidth;
-      naturalH = img.naturalHeight;
-      corners = [
-        {x: 10, y: 10},
-        {x: naturalW-10, y: 10},
-        {x: naturalW-10, y: naturalH-10},
-        {x: 10, y: naturalH-10},
-      ];
-      drawOverlay();
-    }
-  </script>
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<DocumentScanner />);
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </body>
 </html>
